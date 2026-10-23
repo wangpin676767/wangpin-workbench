@@ -1,1 +1,8 @@
-/target/
+node_modules/
+dist/
+extracted/
+native/chat-accelerator/target/
+__pycache__/
+*.bak
+*.tmp
+*.log
