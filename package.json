@@ -1,0 +1,19 @@
+{
+  "name": "wangpin-multi-opensource",
+  "productName": "wangpin Multi OpenSource",
+  "version": "1.9.137",
+  "description": "王品工作台開源版本：多模型對話與專案管理",
+  "author": "Wangpin",
+  "main": "src/main.js",
+  "dependencies": {
+    "dompurify": "^3.4.15",
+    "fzstd": "^0.1.1",
+    "marked": "^18.0.13",
+    "sql.js": "^1.14.2",
+    "ws": "8.22.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/run-tests.cjs"
+  }
+}

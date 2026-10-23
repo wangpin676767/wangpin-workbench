@@ -1,34 +1,25 @@
-# 王品工作台｜原始碼公開版
+# Chat hot-path accelerator
 
-Windows x64 多模型桌面工作台，最新公開版本 **1.9.104**。
+The Electron interface and CLI integrations remain JavaScript. The optional Windows x64 Rust Node-API module handles cached UTF-16 substring scans and background JSONL/Zstandard transcript filtering. Unicode normalization, snippets, message deduplication, attachments and tool presentation remain in the existing JavaScript implementation.
 
-- [下載安裝檔、完整原始碼 ZIP 與 SHA256](https://github.com/wangpin676767/wangpin-app/releases/tag/v1.9.104)
-- [官方下載頁](https://www.wangpin67.com/p/wangpin-app.html)
+Build with an MSVC x64 Rust toolchain and Visual Studio C++ Build Tools:
 
-## 1.9.104
+```powershell
+python build/build_native.py
+python build/build_offline.py
+```
 
-修正誤入全螢幕導致標題列、關閉按鈕與 Windows 工作列消失。停用 F11 全螢幕切換，保留最大化、還原及一般 Escape 行為。
+`--toolchain-dir PATH` optionally selects an isolated directory containing `cargo` and `rustup` homes. The generated `.node`, source fingerprints and third-party notices live in `src/native`. Packaging checks that the binary matches the recorded Rust source inputs. Users do not need Rust installed.
 
-保留 wangpinplan、skill／Markdown／MCP、System Prompt、網頁模型與帳號管理、Rust 加速；不包含王品agent腳本功能。模型服務需自行登入並使用自己的額度。
+Search indexes retain complete message indices, validate text/role changes and use an LRU capped at 128 histories and a conservative 32 MiB retained-data estimate. Small histories use cached JavaScript. Native matching operates on little-endian UTF-16 code units, including lone surrogates, and checks even-byte alignment.
 
-## 安裝與原始碼
+Native transcript filtering runs on libuv workers. The existing parser handles retained messages in yielding batches. Unsupported JSON, native read errors and oversized records fall back to the original streaming reader, preserving strict physical-line diagnostics. No conversation files are modified. `CODEX_MULTI_NATIVE_DISABLED=1` disables native execution for diagnostics.
 
-1. 關閉舊開源版，至 Release 的 Assets 下載 `wangpin-Setup-OpenSource-1.9.104.exe`。
-2. 下載 `SHA256SUMS.txt`，用 `Get-FileHash -Algorithm SHA256` 核對。
-3. 完整程式請下載 **`wangpin-source-1.9.104.zip`**，包含 JavaScript、Rust、建置工具及測試；建置說明及第三方條款見 ZIP 內 README、THIRD_PARTY_NOTICES.md。
+Focused verification:
 
-GitHub 自動產生的 Source code ZIP 僅對應儲存庫內容，完整應用程式原始碼以附加 ZIP 為準。
+```powershell
+node --test tests/native-accelerator.test.js tests/chat-search.test.js tests/distill-export.test.js tests/recent-messages.test.js
+node native/benchmark.cjs PATH_TO_EVIDENCE
+```
 
-安裝檔 SHA256：`925f112b5cf99e1035853052632c84eaf33a10b5277046227cfc4dab596456a4`。安裝檔未簽章。
-
-## 驗證
-
-7 項針對性測試、5 項包內視窗驗證及 125 個產品檔案核對通過；未執行真實模型推論或壓力測試。
-
-## 授權狀態
-
-專案授權尚未指定，請勿假設已取得自由修改及再散布的授權；第三方元件依各自條款。
-
-## 問題回報
-
-請使用 Issues，附版本、Windows 版本及重現步驟；不要公開金鑰、Cookie、登入資料或私人對話。
+`native/baseline` freezes the 1.9.86 reference for differential tests. Benchmarks use fixed synthetic conversations, compare full search results and report cold setup, warm queries and equivalent cached JavaScript separately. Results concern these hot paths, not model/network response time or overall application speed. No stress tests are required.
