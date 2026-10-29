@@ -5,6 +5,7 @@ const os = require('os');
 
 function availability(config = {}) {
   if (config.enabled === false) return { app: false, brave: false, primary: null, both: false };
+  if (config.selectionMode === 'conversation') return {app:false,brave:false,primary:'conversation',both:false,conversation:true};
   if (config.wangpinEnabled === true) return { app: false, brave: false, primary: 'wangpin', both: false, wangpin: true };
   const modern = Object.prototype.hasOwnProperty.call(config, 'appEnabled') || Object.prototype.hasOwnProperty.call(config, 'braveEnabled');
   const app = modern ? config.appEnabled === true : config.engine !== 'brave';
@@ -21,6 +22,7 @@ function migrateLegacy(config = {}) {
 function toolGuidance(config = {}) {
   const active = availability(config);
   if (!active.primary) return '';
+  if (active.conversation) return '瀏覽器依使用者在對話中的指定選擇，不限定王品或 Brave。工作台 browser_list 只列出實際安裝的支援項目；先用 browser_select({browser:實際ID})，或 browser_open 的 browser 欄位，再用 browser_* 操作。尚未指定時請詢問要用哪個，不要猜測。Chrome／Edge／Brave／一般 Firefox 是工作台獨立設定檔，不含平常的登入或既有分頁；王品 Firefox 才沿用經驗證的原設定檔。選擇只影響本段對話。缺少、版本不相容或被拒絕時明確回報，不得改用別的瀏覽器、Shell 或端點繞過。先 snapshot 再互動，只有工具成功才可宣稱完成。';
   if (active.wangpin) return '使用者選擇操作王品瀏覽器（Firefox）：工作台 app_browser MCP 的 browser_* 工具直接控制原本的王品 Firefox 與現有登入分頁；先呼叫 browser_tabs 列出既有分頁，依實際 tabId 操作。不要用官方 Browser runtime 的分頁清單判斷 Firefox 是否連線；不要改用 Brave、Chrome、官方 Chromium 擴充或只用 Shell 開網址。先 browser_snapshot 再點擊或輸入；只有成功工具結果才可聲稱完成。';
   if (active.both) return '你可以操作兩套彼此分開的瀏覽器：browser_* 是 App 右側的內建瀏覽器；brave_* 是 App 外的外部 Brave。使用者說「外部 Brave」「App 外」「在 Brave 裡」時，必須用 brave_*；說「內建瀏覽器」「右側面板」時用 browser_*。點擊或輸入前先取得該瀏覽器的 snapshot。';
   if (active.app) return '你可以用 browser_* 操作 App 右側的內建瀏覽器。使用者要開網頁、點擊、輸入或截圖時，直接使用工具；點擊或輸入前先用 browser_snapshot。';
@@ -53,6 +55,7 @@ function nativeAvailability(config = {}, provider = 'codex') {
 }
 
 function codexGuidance(config = {}, home) {
+  if (availability(config).conversation) return toolGuidance(config)+' 使用者指定「王品瀏覽器」時，必須優先使用本回合提供的 app_browser MCP：先呼叫 browser_list，接著 browser_select({browser:"wangpin"})，再用 browser_tabs／browser_snapshot 操作王品 Firefox 的既有分頁。王品 Firefox 不會出現在官方 cua_repl 的瀏覽器清單；只看到 Brave 不代表王品瀏覽器無法連接。只有 app_browser 工具明確失敗後才能報告實際錯誤，不能根據另一套清單要求使用者重複授權。使用者指定一般 Chrome、Edge 或 Brave 的既有登入時，才依實際提供的官方 cua／Browser runtime 操作；不得混淆兩套清單或擅自更換瀏覽器。';
   if (!prefersBraveExtension(config)) return toolGuidance(config);
   const client = findBrowserClient(home);
   let setup;
@@ -76,6 +79,7 @@ function codexGuidance(config = {}, home) {
 const CHROME_TOOLS = ['tabs_context_mcp', 'tabs_create_mcp', 'navigate', 'read_page', 'get_page_text', 'find', 'computer', 'form_input', 'list_connected_browsers', 'select_browser', 'switch_browser'].map((n) => `mcp__claude-in-chrome__${n}`);
 
 function claudeGuidance(config = {}) {
+  if (availability(config).conversation) return toolGuidance(config)+' 使用者指定平常已登入的 Chromium 瀏覽器時，可用實際提供的 Claude 官方擴充；先列出已連線瀏覽器，依使用者指定選擇實際名稱與 ID，不限定 Brave。不代表工作台 browser_select 已選擇官方擴充。缺少連線或被拒絕時回報，不能切換通道繞過。';
   if (!prefersBraveExtension(config, 'claude-cli')) return toolGuidance(config);
   return [
     '本回合使用者已勾選「使用外部 Brave」：請用 Brave 裡已安裝的 Claude 官方擴充（mcp__claude-in-chrome__* 工具）操作使用者自己的 Brave。這是使用者平常的設定檔，帶著既有的 Google、Blogger 等登入；遇到需要網頁互動、已登入網站或檢查頁面的任務，主動使用這些工具完成，不要只提供手動步驟。',

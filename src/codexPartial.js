@@ -17,7 +17,7 @@ function create() {
     const all = [...items.values()];
     const text = all.filter(i => i.type === 'agent_message' && !['commentary','analysis'].includes(i.phase)).map(i => i.text).filter(Boolean).join('\n\n');
     const reasoning = all.filter(i => i.type === 'reasoning' || (i.type === 'agent_message' && ['commentary','analysis'].includes(i.phase))).map(i => i.text).filter(Boolean).join('\n\n');
-    const tools = all.filter(i => !['agent_message','reasoning','error'].includes(i.type)).map(i => ({ name: i.name || i.type, args: String(i.args || i.command || i.query || JSON.stringify(i.changes || i.tool || '')).slice(0,4000) }));
+    const tools = all.filter(i => !['agent_message','reasoning','error'].includes(i.type)).map(i => ({ name: i.label || i.name || i.type, status:i.status, commandLifecycle:i.commandLifecycle, args: String(i.args || i.command || i.query || JSON.stringify(i.changes || i.tool || '')).slice(0,4000) }));
     return { text, reasoning, tools, codexSnapshot: { startedAt } };
   }
   return { capture, snapshot };

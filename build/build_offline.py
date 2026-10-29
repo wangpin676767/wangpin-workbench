@@ -14,7 +14,7 @@ if (root/'native/chat-accelerator').is_dir():
  for name, expected in native_stamp['sources'].items():
   assert hashlib.sha256((root/name).read_bytes()).hexdigest() == expected, 'Rebuild native accelerator: '+name
 EXE_NAME = 'WangpinMultiOpenSource.exe'
-ELECTRON_EXES = [EXE_NAME, 'electron.exe', 'Codex Multi.exe']
+ELECTRON_EXES = [EXE_NAME, 'electron.exe', 'Codex Multi.exe', '王品工作台.exe']
 
 def runtime_exe(d):
  for n in ELECTRON_EXES:
@@ -54,7 +54,7 @@ with zipfile.ZipFile(payload,'w',zipfile.ZIP_DEFLATED,compresslevel=5) as z:
   z.write(p,str(rel))
  for name in ['src','node_modules','build']:
   for p in (root/name).rglob('*'):
-   if name=='node_modules' and p.relative_to(root/name).parts[0]=='electron': continue
+   if name=='node_modules' and p.relative_to(root/name).parts[0] not in {'dompurify','fzstd','marked','sql.js','ws'}: continue
    if p.is_file() and public_file(p) and (name!='build' or p.suffix in ['.ico','.png']): z.write(p,str(Path('resources/app')/p.relative_to(root)))
  z.write(root/'package.json','resources/app/package.json')
  for extra in ['THIRD_PARTY_NOTICES.md','LICENSE','README.md']:

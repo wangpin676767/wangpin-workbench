@@ -6,11 +6,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-function defaultProfile(userDir, home = require('os').homedir()) {
-  const managed = path.join(userDir, 'claude-desktop-profile');
-  const global = path.join(home, '.claude');
-  return !fs.existsSync(path.join(managed, '.credentials.json')) && fs.existsSync(path.join(global, '.credentials.json')) ? global : managed;
-}
+function defaultProfile(userDir) { return path.join(userDir, 'claude-desktop-profile'); }
 
 function profileKey(dir) {
   const resolved = path.resolve(String(dir || ''));

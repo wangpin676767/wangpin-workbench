@@ -1,27 +1,17 @@
-# 王品工作台 開源版本
+# 王品工作台開源版
 
-Windows x64 多模型桌面工作台，目前版本 **1.9.137**。
+本原始碼以王品工作台 1.9.158 為基礎，提供 Windows 多模型對話、模型切換、對話管理和定時送出。此版移除 Persona Agent 與王品 Agent 腳本功能及其後端、畫面和 IPC；一般子 Agent 及 wangpinplan 為其他功能。
 
-[下載安裝檔、完整原始碼與 SHA256](https://github.com/wangpin676767/wangpin-workbench/releases)
+## 隱私與登入
 
-支援 Codex、Claude、Antigravity、Grok Build、網頁與 API 連線，以及 wangpinplan、skill、MCP、System Prompt、影音附件分析與 Rust 加速。模型服務須自行登入並使用自己的額度。
+原始碼及安裝包不附作者的使用者資料、對話、附件、設定、登入憑證或瀏覽器設定檔。開源版預設使用 `%APPDATA%\Wangpin Workbench Open Source`，Codex 預設使用該目錄內獨立的 `codex-home`；預設不自動複製 Brave 登入或 Claude Desktop 憑證。使用者可自行登入或選擇其他資料夾；手動匯入資料後，該電腦上的資料由使用者管理。選用的模型供應商、工具或網站會接收執行所需資料，使用前請檢查其政策。
 
-## 安裝
+開源版沒有發佈使用者的聊天或自動上傳個人資料；請勿把自己的設定、對話、附件、帳號檔、`.env`、瀏覽器資料或 token 加進儲存庫。這份檢查不能保證所有第三方套件或後續改動均無問題。
 
-下載 Release Assets 的 `wangpin-Setup-OpenSource-1.9.137.exe`，並用 `SHA256SUMS.txt` 核對。安裝位置為 `%LOCALAPPDATA%\Programs\WangpinMultiOpenSource`，資料位於 `%APPDATA%\wangpin Multi OpenSource`。
+## 建置與測試
 
-此版本不提供王品 agent 流程腳本建立、編輯或執行功能。交付不包含帳號、金鑰、對話、附件或瀏覽器使用者設定檔。
+需要 Windows x64、Node.js 22.12 以上、npm、Python 3 與 .NET Framework 4.x C# 編譯器。執行 `npm ci`，再執行 `npm test`。預設使用 `node_modules/electron/dist`，或透過 `ELECTRON_RUNTIME_DIR` 指向相同版本的 Electron 發行目錄；執行 `python build/build_offline.py` 產出獨立安裝包。
 
-## 原始碼與建置
+為避免散布非原始碼原生執行檔，此版不含可選的 Windows 原生加速模組，採用現有 JavaScript 後備路徑。定時送出需工作台保持開啟，只支援文字。
 
-儲存庫提供完整應用程式來源，Release 也附完整來源 ZIP。使用 Node.js、Python 3.11+、.NET Framework C# 編譯器：執行 `npm ci`，取得 Windows x64 Electron 發行版，設定 `ELECTRON_RUNTIME_DIR` 後執行 `python build/build_offline.py`。執行 `npm test` 進行相關測試。
-
-Rust 加速器來源位於 `native/chat-accelerator`；修改後先執行 `python build/build_native.py`（需 MSVC x64 Rust 工具鏈與 Visual Studio C++ Build Tools）。
-
-## 驗證
-
-68 項測試通過；來源與最終包皆通過隔離介面對話收發、保存、重開及功能移除檢查。157 個產品來源檔案與包內一致；498 個交付項目掃描未發現已知個人路徑、帳號或金鑰。未執行真實模型推論或壓力測試。
-
-## 授權與問題回報
-
-專案採 MIT 授權，第三方元件保留原授權，詳見 `LICENSE` 與 `THIRD_PARTY_NOTICES.md`。請透過 Issues 回報版本、Windows 版本與重現步驟，勿公開金鑰、Cookie、登入資料或私人對話。
+授權見 LICENSE；第三方元件及素材見 THIRD_PARTY_NOTICES.md 和各自的 LICENSE/NOTICE。涉及第三方網站、模型帳號和角色設定時，仍須遵守其各自條款。

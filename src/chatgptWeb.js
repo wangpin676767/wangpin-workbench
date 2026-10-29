@@ -29,6 +29,7 @@ const transientTabs = new Set();
 const privateBrowsers = new Map();
 const privateStarts = new Map();
 const ownedTabs = new Map();
+const registryWrites = new WeakMap();
 let anonymousTabId = 0;
 const webTurnQueue = createWebTurnQueue();
 
@@ -370,11 +371,26 @@ function registryFor(brave) {
   if (!ownedTabs.has(endpoint)) ownedTabs.set(endpoint, new Map());
   return ownedTabs.get(endpoint);
 }
-async function openTab(conn, { chatKey, url, hidden = false, registry = tabs, keepTab = false }) {
+function withRegistry(registry, work) {
+  const previous = registryWrites.get(registry) || Promise.resolve();
+  const next = previous.catch(() => {}).then(work);
+  registryWrites.set(registry, next);
+  next.finally(() => { if (registryWrites.get(registry) === next) registryWrites.delete(registry); }).catch(() => {});
+  return next;
+}
+async function reclaimPending(conn, registry) {
   for (const [key, value] of registry) if (value.pendingClose) {
     if (!await closeTarget(conn,value.targetId)) throw Error('ChatGPT 上一輪分頁尚未回收，本次不會再建立新分頁。');
     registry.delete(key);
+    if (value.transient) transientTabs.delete(value.targetId);
   }
+}
+async function openTab(conn, opts) {
+  const registry = opts.registry || tabs;
+  return withRegistry(registry, () => openTabInner(conn, { ...opts, registry }));
+}
+async function openTabInner(conn, { chatKey, url, hidden = false, registry, keepTab = false }) {
+  await reclaimPending(conn, registry);
   const known = chatKey && registry.get(chatKey);
   const infos = ((await conn.send('Target.getTargets')).targetInfos || []).filter(t => t.type === 'page');
   if (known && infos.some(t => t.targetId === known.targetId)) {
@@ -624,9 +640,12 @@ async function askInner(opts) {
   } finally {
     // 一次性回覆只關自己的分頁；MCP 保留到整段工具流程結束。
     if ((tab || registry?.has(key)) && (temporary || opts.closeTab || !chatKey) && !opts.keepTab) {
-      const item=registry?.get(key), targetId=tab?.targetId || item?.targetId;
-      if(await closeTarget(conn,targetId))registry?.delete(key);
-      else if(item){item.pendingClose=true;item.pinned=false;onStatus('網頁分頁回收尚未完成，已保留追蹤；不會繼續累積新分頁。');}
+      const cleanup = async () => {
+        const item=registry?.get(key), targetId=tab?.targetId || item?.targetId;
+        if(await closeTarget(conn,targetId))registry?.delete(key);
+        else if(item){item.pendingClose=true;item.pinned=false;onStatus('網頁分頁回收尚未完成，已保留追蹤；不會繼續累積新分頁。');}
+      };
+      if (registry) await withRegistry(registry, cleanup); else await cleanup();
     }
     if (session) await session.release?.();
     else conn.close(); // 只斷開連線，Brave 本身不動
@@ -643,7 +662,7 @@ async function closeSession(chatKey, { WebSocketImpl, brave: given, profileDir, 
   const known = chatKey && registry?.get(chatKey);
   if (!known) return false;
   let conn;
-  try {conn=await new CdpConnection(brave.version.webSocketDebuggerUrl, WebSocketImpl || globalThis.WebSocket || require('ws')).open();const closed=await closeTarget(conn,known.targetId);if(closed && registry.get(chatKey)===known)registry.delete(chatKey);return closed;}
+  try {conn=await new CdpConnection(brave.version.webSocketDebuggerUrl, WebSocketImpl || globalThis.WebSocket || require('ws')).open();return await withRegistry(registry,async()=>{const closed=await closeTarget(conn,known.targetId);if(closed && registry.get(chatKey)===known)registry.delete(chatKey);return closed;});}
   finally {if(registry.get(chatKey)===known)known.pendingClose=true;known.pinned=false;conn?.close();touchIdle();}
 }
 
@@ -663,17 +682,26 @@ async function listModelsInner({ WebSocketImpl, brave: given, signal, profileDir
   const session = openSession ? await openSession({ chatKey: 'gptweb:models', url: HOME, temporary: true }) : null;
   const brave = session || given || await hiddenBrave({ WebSocketImpl, profileDir, bravePath, importExistingLogin });
   const conn = session?.conn || await new CdpConnection(brave.version.webSocketDebuggerUrl, WebSocketImpl).open();
-  let tab = null;
+  let tab = null, lease = null;
+  const registry = session ? null : registryFor(brave);
   try {
     if (session) tab = session.tab;
     else {
-      const created = await conn.send('Target.createTarget', { url: HOME, background: !brave.hidden });
-      transientTabs.add(created.targetId);
-      tab = await new Tab(conn, created.targetId).attach();
+      lease = await withRegistry(registry, async () => {
+      await reclaimPending(conn, registry);
+      if (signal?.aborted) return null;
+      const targetId = (await conn.send('Target.createTarget', { url: HOME, background: !brave.hidden })).targetId;
+      const key = Symbol('model-discovery'), item = { targetId, usedAt: Date.now(), pinned: true, transient: true };
+      registry.set(key, item);
+      transientTabs.add(targetId);
+      return { key, item };
+      });
+      if (!lease) return { cancelled: true, models: [] };
+      tab = await new Tab(conn, lease.item.targetId).attach();
     }
     if (brave.hidden && hideWindow) await tab.hide?.().catch(() => {});
     else if (!hideWindow && brave.hidden) await tab.present?.();
-    await waitComposer(tab, signal, () => {}, HOME);
+    if (!await waitComposer(tab, signal, () => {}, HOME) || signal?.aborted) return { cancelled: true, models: [] };
     const r = await conn.send('Runtime.evaluate', { expression: PAGE.models, returnByValue: true, awaitPromise: true }, tab.sessionId);
     if (r.exceptionDetails) throw new Error(`讀不到 ChatGPT 的模型清單：${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`);
     const v = (r.result && r.result.value) || {};
@@ -691,8 +719,15 @@ async function listModelsInner({ WebSocketImpl, brave: given, signal, profileDir
     const efforts = Array.isArray(effortInfo && effortInfo.efforts) ? effortInfo.efforts : [];
     return { models, defaultModel: String(v.defaultModel || ''), efforts, currentEffort: String((effortInfo && effortInfo.currentEffort) || ''), ...(effortInfo && effortInfo.effortError ? { effortError: effortInfo.effortError } : {}), effortModel: model || String(v.defaultModel || ''), pickerVersion: 2 };
   } finally {
-    if (tab) await conn.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
-    if (tab) transientTabs.delete(tab.targetId);
+    if (lease) await withRegistry(registry, async () => {
+      const { key, item } = lease;
+      if (await closeTarget(conn, item.targetId)) {
+        if (registry.get(key) === item) registry.delete(key);
+        transientTabs.delete(item.targetId);
+      } else { item.pendingClose = true; item.pinned = false; }
+    });
+    // Embedded sessions own their WebContents lifecycle rather than a CDP endpoint.
+    else if (session && tab) await conn.send('Target.closeTarget', { targetId: tab.targetId }).catch(() => {});
     if (session) await session.release?.();
     else conn.close();
   }

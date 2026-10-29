@@ -1,5 +1,5 @@
 'use strict';
-// Serialize writes per key, retaining only the latest pending request.
+// Each key retains one active operation and one shared latest pending operation.
 function create(work) {
   const states = new Map();
   const counts = {started:0,completed:0,coalesced:0,maxPending:0};

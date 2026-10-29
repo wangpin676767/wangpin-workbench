@@ -113,16 +113,10 @@ const BUILTINS = [
     id:'companion',name:'長期陪伴角色',category:'陪伴',prefix:'companion',kind:'companion',chatSafe:true,
     // 不提供工具：勾選後這段對話的每則訊息都直接由角色回覆（main.js 的 companion 分支），模型拿不到檔案或指令
     summary:'勾選後，這段對話由一位有自己生活、心情與記憶的長期陪伴角色直接回覆（預設名字「葉澄」，可在設定改）。她會記得你們之間的事、感知現在幾點和多久沒聊，關係會自然慢慢變化。',
-    detail:'性格核心參考《魔法使之夜》蒼崎青子（直率、好勝、嘴硬、毒舌但在意人），人生背景與人際關係全部原創。人格、角色內推理、長期記憶與關係時間線分別是 PsyAgent、Thinking in Character（RAR）、Letta（MemGPT）、Graphiti／Zep 的概念適配（純 JavaScript 本機實作，非官方套件，不需要 Python、Neo4j 或資料庫）。模型沿用目前對話、純聊天唯讀；每回合 1 次模型呼叫（推理＋回覆＋記憶整理合併），回覆沒通過口吻檢查時再重寫 1 次，最多 2 次。記憶存在本機 userData/companion。',
+    detail:'性格特質為直率、好勝、嘴硬但在意人的原創角色，人生背景與人際關係全部原創。人格、角色內推理、長期記憶與關係時間線分別是 PsyAgent、Thinking in Character（RAR）、Letta（MemGPT）、Graphiti／Zep 的概念適配（純 JavaScript 本機實作，非官方套件，不需要 Python、Neo4j 或資料庫）。模型沿用目前對話、純聊天唯讀；每回合 1 次模型呼叫（推理＋回覆＋記憶整理合併），回覆沒通過口吻檢查時再重寫 1 次，最多 2 次。記憶存在本機 userData/companion。',
     detect(cfg){return {available:true,path:'',note:`角色：${String(cfg.name||'').trim()||require('./companionPersona').DEFAULT_NAME}；模型沿用目前對話（僅聊天、不碰檔案）`};},
   },
-  {
-    id:'aoko',name:'蒼崎青子（命題 Agent）',category:'陪伴',prefix:'aoko',kind:'aoko',chatSafe:true,
-    // 不提供工具：勾選後這段對話的每則訊息都由青子直接回覆（main.js 的 aoko 分支），模型拿不到檔案或指令
-    summary:'勾選後，這段對話由《魔法使之夜》蒼崎青子（見習時期）直接回覆。她的思考被拆成 84 條因果命題、各自一個規則節點：程式先更新情緒、激動、疲勞、信任、預期落差，選定反射／習慣／審慮與要做的行動，模型才依這些限制寫台詞。',
-    detail:'人物設定（有公開依據的特質與本擴充的推論分開標示）在 vendor/aoko/persona/aoko.json；84 條命題與資料埠在 vendor/aoko/rules。引擎是 Python（3.10 以上），純本機、不裝額外套件；模型呼叫全部轉回工作台，沿用目前對話的模型與登入方式（僅聊天、不碰檔案）。每回合約 2 次模型呼叫（標記原句線索＋寫台詞），回覆沒通過檢查時再重寫 1 次。跨回合狀態存在 userData/aoko，每段對話各一份。預設她看不到工作台的對話紀錄；在擴充選單勾選「讓青子看得到本段對話紀錄」後，每回合會帶入最近 12 則訊息當背景（只套用該段對話）。這是功能層次的模擬，不代表證明她的內部運作與人類相同；台詞是本擴充的設計，不是原作台詞。',
-    detect(cfg){const bin=require('./ragthoven').python(cfg.path);return {available:!!bin,path:bin||'',note:bin?`引擎已內建；Python：${bin}；模型沿用目前對話（僅聊天、不碰檔案）`:'請安裝 Python 3.10 以上，或填入 python.exe 路徑'};},
-  },
+
   {
     id:'harness',name:'自訂 Harness',category:'流程',prefix:'harness',kind:'harness',chatSafe:true,
     // 不提供工具：勾選後這段對話的每則訊息都交給選定的腳本跑完整個流程（main.js 的 harness 分支）
@@ -492,7 +486,7 @@ async function openSession(ctx = {}) {
 
   for (const pack of packs) {
     // 陪伴角色不是工具包：它接管整段對話的回覆，由 main.js 在送出時直接處理
-    if (pack.kind === 'companion' || pack.kind === 'harness' || pack.kind === 'aoko' || pack.kind === 'prompt') continue;
+    if (pack.kind === 'companion' || pack.kind === 'harness' || pack.kind === 'prompt') continue;
     // 「僅聊天」時：API 模型還是可以用不碰檔案的工具包（例如 Scrapling）；
     // 但 Codex／Claude Code 這類原生 CLI 在僅聊天模式下會被關掉所有工具，連 MCP 也叫不動，
     // 所以這裡就不要讓它顯示成「已啟用」卻其實用不了。

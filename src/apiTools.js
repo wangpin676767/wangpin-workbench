@@ -2,8 +2,7 @@
 // 權限模式沿用 Codex 的講法：chat（僅聊天）／read-only（唯讀）／workspace-write（工作區寫入）／danger-full-access（完全存取）。
 const fs = require('fs').promises;
 const path = require('path');
-const { execFile } = require('child_process');
-const { killTree } = require('./codexRunner');
+const commandExecution = require('./commandExecution');
 
 const spec = (name, description, properties, required) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required: required || [], additionalProperties: false } } });
 const str = (description) => ({ type: 'string', description });
@@ -13,7 +12,7 @@ const tab = () => ({ tabId: str('分頁 ID；省略時操作目前的分頁（�
 
 // 預設瀏覽器工具：只開內建時控制內建瀏覽器；只開 Brave 時控制 Brave；兩者都開時控制內建瀏覽器。
 const BROWSER_TOOLS = [
-  spec('browser_open', '在預設瀏覽器開啟網址；如果給的是關鍵字，會直接搜尋。要在瀏覽器做任何事都從這裡開始。', { url: str('網址或搜尋關鍵字'), newTab: bool('true 表示開在新分頁') }, ['url']),
+  spec('browser_open', '在所選瀏覽器開啟網址；如果給的是關鍵字，會直接搜尋。', { url: str('網址或搜尋關鍵字'), newTab: bool('true 表示開在新分頁'), browser: str('依對話指定模式可填 browser_list 回傳的 ID；同時選擇本段對話的瀏覽器') }, ['url']),
   spec('browser_snapshot', '列出目前頁面可以互動的元素（按鈕、連結、輸入框）與它們的編號與文字，並附上頁面文字。要點擊或輸入之前先用這個取得 index。', { ...tab() }),
   spec('browser_read', '讀取目前頁面的標題、網址與文字內容。', { maxChars: num('最多回傳幾個字元，預設 6000'), ...tab() }),
   spec('browser_click', '點擊頁面上的元素。優先用 browser_snapshot 拿到的 index。', { index: num('browser_snapshot 給的編號'), selector: str('CSS 選擇器'), text: str('用元素上的文字找（部分符合即可）'), ...tab() }),
@@ -29,6 +28,7 @@ const BROWSER_TOOLS = [
 ];
 
 const BROWSER_EVAL = spec('browser_eval', '在目前頁面執行 JavaScript。只有在完全存取模式才提供。', { expression: str('要執行的 JavaScript'), ...tab() }, ['expression']);
+const BROWSER_CHOICE_TOOLS = [spec('browser_list','列出實際安裝的瀏覽器及本段對話選擇，不開啟瀏覽器。',{}),spec('browser_select','依使用者指定選擇本段對話使用的瀏覽器；不會開啟瀏覽器。',{browser:str('browser_list 回傳的瀏覽器 ID；不能傳入路徑或指令')},['browser'])];
 
 function braveAlias(tool) {
   const fn = tool.function;
@@ -51,6 +51,7 @@ function definitions(mode, ctx = {}) {
   if (mode === 'danger-full-access') tools.push(spec('run_command', '執行 PowerShell 指令（使用者已選擇完全存取）。', { command: str('要執行的指令'), timeout_seconds: timeout }, ['command']));
   else if (mode === 'workspace-write' && ctx.approval !== 'never') tools.push(spec('run_command', '執行 PowerShell 指令。工作目錄固定在專案內，而且每次執行前會先請使用者同意。', { command: str('要執行的指令'), timeout_seconds: timeout }, ['command']));
   if (ctx.browser) tools.push(...BROWSER_TOOLS);
+  if (ctx.browser?.conversationChoice) tools.push(...BROWSER_CHOICE_TOOLS);
   if (ctx.braveBrowser) tools.push(...BRAVE_TOOLS);
   if (ctx.browser && mode === 'danger-full-access') tools.push(BROWSER_EVAL);
   if (ctx.braveBrowser && mode === 'danger-full-access') tools.push(BRAVE_EVAL);
@@ -92,8 +93,11 @@ async function runBrowserTool(name, args, ctx) {
   const browser = ctx.browser;
   if (!browser) throw new Error('瀏覽器工具目前是關閉的。請在輸入區的權限選單開啟「操作瀏覽器」再試。');
   switch (name) {
+    case 'browser_list': return JSON.stringify(await browser.list(),null,2);
+    case 'browser_select': {const result=await browser.select({browser:args.browser});return `已選擇：${result.label}（${result.id}）。${result.note}\n尚未開啟瀏覽器。`;}
     case 'browser_open': {
-      const r = await browser.open({ url: args.url, newTab: !!args.newTab });
+      if(args.browser&&!browser.conversationChoice)throw Error('目前使用固定瀏覽器；請在權限選單改為「依對話指定瀏覽器」。');
+      const r = await browser.open({ url: args.url, newTab: !!args.newTab, ...(args.browser?{browser:args.browser}:{}) });
       return `已開啟：${shorten(r.url)}\n標題：${r.title || '（沒有標題）'}\n分頁 ID：${r.tabId}`;
     }
     case 'browser_snapshot': {
@@ -144,7 +148,28 @@ async function runBrowserTool(name, args, ctx) {
   }
 }
 
+// Cancellation cannot depend on an approval UI eventually resolving its promise.
+function waitApproval(work, signal) {
+  return new Promise((resolve,reject)=>{
+    let settled=false;
+    const finish=(error,value)=>{if(settled)return;settled=true;signal?.removeEventListener('abort',abort);error?reject(error):resolve(value);};
+    const abort=()=>finish(Object.assign(Error('已停止'),{name:'AbortError'}));
+    if(signal?.aborted){abort();return;}
+    signal?.addEventListener('abort',abort,{once:true});
+    Promise.resolve().then(()=>{if(signal?.aborted)throw Object.assign(Error('已停止'),{name:'AbortError'});return work();}).then(value=>finish(null,value),error=>finish(error));
+  });
+}
+
 async function execute(name, args, modeOrCtx, cwdIn, signalIn) {
+  const ctx = modeOrCtx && typeof modeOrCtx === 'object' ? modeOrCtx : {mode:modeOrCtx,cwd:cwdIn,signal:signalIn};
+  if(name!=='run_command')return executeInner(name,args,ctx);
+  const progress=commandExecution.tracker(ctx.onCommand);
+  progress.update('received');
+  try{return await executeInner(name,args,{...ctx,commandProgress:progress});}
+  catch(error){progress.update('result_ready',{reason:ctx.signal?.aborted?'cancelled':'failed',termination:'not_started_or_unknown'});throw error;}
+}
+
+async function executeInner(name, args, modeOrCtx, cwdIn, signalIn) {
   const ctx = modeOrCtx && typeof modeOrCtx === 'object' ? modeOrCtx : { mode: modeOrCtx, cwd: cwdIn, signal: signalIn };
   const { mode, cwd, signal } = ctx;
   const input = args || {};
@@ -160,32 +185,20 @@ async function execute(name, args, modeOrCtx, cwdIn, signalIn) {
     if (ctx.noDelete) {
       const reason = require('./deleteGuard').detect(input.command);
       if (reason) {
-        const ok = typeof ctx.approveDelete === 'function' && await ctx.approveDelete({ reason, detail: String(input.command), cwd });
+        ctx.commandProgress?.update('awaiting_approval');
+        const ok = typeof ctx.approveDelete === 'function' && await waitApproval(() => ctx.approveDelete({ reason, detail: String(input.command), cwd }), signal);
         if (!ok) throw new Error(`使用者設定了「禁止刪除檔案，除非經我授權」，這次${reason}沒有得到授權，已被擋下。不要改用其他方式繞過；真的需要刪除時，先向使用者說明要刪哪些檔案與原因。`);
       }
     }
     if (mode === 'workspace-write') {
       await checkCommandPaths(input.command, cwd);
       if (typeof ctx.approve !== 'function') throw new Error('目前權限禁止此工具（需要使用者同意才能執行指令）');
-      const ok = await ctx.approve({ kind: 'command', detail: String(input.command), cwd });
+      ctx.commandProgress?.update('awaiting_approval');
+      const ok = await waitApproval(() => ctx.approve({ kind: 'command', detail: String(input.command), cwd }), signal);
       if (!ok) throw new Error('使用者拒絕執行這個指令，請改用其他方式或先詢問使用者。');
     }
     if (signal?.aborted) throw new Error('已停止');
-    return new Promise((resolve, reject) => {
-      let timer; let timedOut = false;
-      const limit = Math.max(5, Math.min(900, Number(input.timeout_seconds) || 120));
-      const stop = () => killTree(child);
-      const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', String(input.command)], { cwd, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (e, stdout, stderr) => {
-        clearTimeout(timer); signal?.removeEventListener('abort', stop);
-        if (signal?.aborted) reject(new Error('已停止'));
-        else if (timedOut) reject(new Error(`指令超過 ${limit} 秒已中止；需要更久請設定 timeout_seconds。\n${stdout}${stderr}`));
-        else if (e) reject(new Error(`${e.message}\n${stderr}`));
-        else resolve(stdout + stderr);
-      });
-      timer = setTimeout(() => { timedOut = true; stop(); }, limit * 1000);
-      signal?.addEventListener('abort', stop, { once: true });
-      if (signal?.aborted) stop();
-    });
+    return commandExecution.run(input.command, { cwd, signal, timeoutSeconds: input.timeout_seconds, progress: ctx.commandProgress });
   }
 
   const file = await scoped(cwd, input.path, name === 'write_file');
@@ -207,6 +220,8 @@ const TOOL_LABELS = {
   write_file: '寫入檔案',
   run_command: '執行指令',
   browser_open: '開啟網頁',
+  browser_list: '列出瀏覽器',
+  browser_select: '選擇瀏覽器',
   browser_snapshot: '看頁面元素',
   browser_read: '讀取頁面',
   browser_click: '點擊',
@@ -248,6 +263,7 @@ function brief(name, args = {}) {
     case 'write_file': return first(args.path);
     case 'run_command': return first(args.command);
     case 'browser_open': return first(args.url);
+    case 'browser_select': return first(args.browser);
     case 'browser_click': return args.text ? `「${first(args.text)}」` : args.selector || (args.index !== undefined ? `#${args.index}` : '');
     case 'browser_type': return `${args.selector || (args.index !== undefined ? `#${args.index}` : '')} ← ${first(args.text).slice(0, 60)}`;
     case 'browser_press': return first(args.key);
@@ -258,4 +274,4 @@ function brief(name, args = {}) {
   }
 }
 
-module.exports = { definitions, execute, scoped, checkCommandPaths, label, brief, TOOL_LABELS, BROWSER_TOOLS, BROWSER_EVAL, BRAVE_TOOLS, BRAVE_EVAL };
+module.exports = { definitions, execute, scoped, checkCommandPaths, label, brief, TOOL_LABELS, BROWSER_TOOLS, BROWSER_CHOICE_TOOLS, BROWSER_EVAL, BRAVE_TOOLS, BRAVE_EVAL };

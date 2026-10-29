@@ -295,6 +295,7 @@ class CdpConnection {
   }
 
   send(method, params = {}, sessionId) {
+    if (this.actionGuard && !this.actionGuard()) return Promise.reject(new Error('已停止'));
     if (!this.ws || this.ws.readyState !== 1) return Promise.reject(new Error(this.closedReason || '瀏覽器連線中斷'));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -315,6 +316,7 @@ class CdpConnection {
 class BraveBrowser {
   constructor(opts = {}) {
     this.bravePath = opts.bravePath || '';
+    this.strictExecutable = !!opts.strictExecutable;
     this.profileDir = opts.profileDir || '';
     this.stateFile = opts.stateFile || '';
     this.verifyEndpoint = typeof opts.verifyEndpoint === 'function' ? opts.verifyEndpoint : null;
@@ -388,13 +390,17 @@ class BraveBrowser {
   }
 
   async start() {
+    if (this.strictExecutable) {
+      try { if (!this.bravePath || !fs.statSync(this.bravePath).isFile()) throw Error('missing'); }
+      catch { throw Error('指定瀏覽器執行檔不存在；不會改用其他瀏覽器。'); }
+    }
     if (this.live) return this.info();
     if (this.conn) { this.log('瀏覽器連線已中斷，重新連線'); this.forgetConnection(); }
     if (this.userProfile) return this.startUserProfile();
     if (!this.profileDir) throw new Error('沒有設定瀏覽器設定資料夾');
     fs.mkdirSync(this.profileDir, { recursive: true });
     const saved = this.readState();
-    if (this.verifyEndpoint) this.bravePath = findBrave(this.bravePath, { fallback: !!this.fallbackBrowsers }).path;
+    if (this.verifyEndpoint && !this.strictExecutable) this.bravePath = findBrave(this.bravePath, { fallback: !!this.fallbackBrowsers }).path;
     for (const port of [this.port, saved && saved.port].filter(Boolean)) {
       const version = await probeVersion(port);
       // A saved port may have been reassigned after the original browser exited.
@@ -416,10 +422,11 @@ class BraveBrowser {
       }
       if (version) { this.port = port; this.version = version; await this.attach(); this.log(`沿用已在執行的 Brave（除錯埠 ${port}）`); return this.info(); }
     }
-    const found = findBrave(this.bravePath, { fallback: !!this.fallbackBrowsers });
+    const found = this.strictExecutable ? {path:this.bravePath,tried:[this.bravePath]} : findBrave(this.bravePath, { fallback: !!this.fallbackBrowsers });
     if (!found.path) throw new Error(`找不到 Brave。已找過：${found.tried.join('、') || '（沒有可用路徑）'}。請在「API 設定 → 其他設定」指定 brave.exe 的位置。`);
     this.bravePath = found.path;
     const port = this.port || (await freePort());
+    if(this.actionGuard && !this.actionGuard())throw Error('已停止');
     const args = [
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${this.profileDir}`,
@@ -441,6 +448,7 @@ class BraveBrowser {
     while (!version && Date.now() < deadline) { version = await probeVersion(port); if (!version) await sleep(400); }
     if (!version) throw new Error('Brave 有啟動，但除錯埠一直沒有回應，請再試一次。');
     this.version = version;
+    if(this.strictExecutable && this.verifyEndpoint && !await this.verifyEndpoint(this)){this.port=0;this.version=null;this.owned=false;throw Error('無法確認指定瀏覽器的執行檔、設定檔與本機控制埠，已停止連線。');}
     await this.attach();
     this.writeState();
     return this.info();
@@ -508,6 +516,7 @@ class BraveBrowser {
 
   async attach() {
     const conn = await new CdpConnection(this.version.webSocketDebuggerUrl, this.WebSocketImpl).open();
+    conn.actionGuard=()=>!this.actionGuard||this.actionGuard();
     this.conn = conn;
     if (conn.ws && conn.ws.addEventListener) conn.ws.addEventListener('close', () => { if (this.conn === conn) { this.conn = null; this.sessions = new Map(); this.activeTab = null; this.version = null; } });
     this.conn.on('Target.detachedFromTarget', (params) => {
@@ -734,7 +743,7 @@ function createController(opts = {}) {
   let activeGuard = null;
   const call = (fn) => { const guard=activeGuard; return browser.enqueue(async () => {
     if(guard && !guard())throw new Error('已停止');
-    if (!opts.shared) return fn();
+    if (!opts.shared) {browser.actionGuard=guard;try{return await fn();}finally{browser.actionGuard=null;}}
     await browser.start();
     if (!scope || scope.conn !== browser.conn || !browser.live) {
       // 沿用登入：分頁要開在預設情境才拿得到使用者的 cookie；各對話改用「自己開過哪些分頁」區隔

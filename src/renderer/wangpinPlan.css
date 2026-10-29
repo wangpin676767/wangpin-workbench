@@ -1,0 +1,17 @@
+.wangpin-plan-dialog { box-sizing: border-box; width: min(740px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; padding: 24px; color: #e6edf7; background: #202835; border: 1px solid #54667f; border-radius: 14px; font: inherit; }
+.wangpin-plan-dialog::backdrop { background: #060a12b8; }
+.wangpin-plan-dialog h2 { margin: 0 0 12px; font-size: 22px; }
+.wangpin-plan-dialog p { line-height: 1.6; }
+.wangpin-plan-enable { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
+.wangpin-plan-stages { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.wangpin-plan-stages fieldset { min-width: 0; padding: 16px; border: 1px solid #56657a; border-radius: 8px; }
+.wangpin-plan-stages legend { padding: 0 6px; font-weight: 600; }
+.wangpin-plan-stages label { display: block; margin-bottom: 14px; line-height: 1.6; }
+.wangpin-plan-stages select, .wangpin-plan-stages input { box-sizing: border-box; width: 100%; margin-top: 6px; padding: 9px; color: #e6edf7; background: #131b26; border: 1px solid #60718b; border-radius: 6px; font: inherit; }
+.wangpin-plan-dialog button { padding: 9px 15px; color: #e6edf7; background: #34445d; border: 1px solid #6681a6; border-radius: 6px; font: inherit; cursor: pointer; }
+.wangpin-plan-dialog button:disabled { opacity: .55; cursor: default; }
+.wangpin-plan-stage-status { overflow-wrap: anywhere; min-height: 24px; font-size: 13px; color: #c0cfe3; }
+.wangpin-plan-policy { color: #c0cfe3; font-size: 14px; }
+.wangpin-plan-error { color: #ffa590; overflow-wrap: anywhere; }
+.wangpin-plan-actions { display: flex; justify-content: flex-end; gap: 12px; }
+@media (max-width: 620px) { .wangpin-plan-stages { grid-template-columns: 1fr; } .wangpin-plan-dialog { padding: 16px; } }
